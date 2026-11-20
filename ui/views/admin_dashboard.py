@@ -9,6 +9,8 @@ from ui.components.chart_frame import ChartFrame
 from ui.components.data_table import DataTable
 from services.report_service import report_service
 from services.transaction_service import transaction_service
+from services.account_service import account_service
+from services.loan_service import loan_service
 from services.auth_service import SessionContext
 from utils.formatters import format_currency
 
@@ -117,21 +119,43 @@ class AdminDashboardView(ctk.CTkScrollableFrame):
 
     def refresh_data(self):
         """Fetch updated statistics and replot charts."""
-        kpis = report_service.get_kpi_summary()
+        is_cust = self.current_session.is_customer
+        cust_id = self.current_session.customer_id if is_cust else None
 
-        self.stat_cards["customers"].update_value(str(kpis["total_customers"]))
-        self.stat_cards["accounts"].update_value(str(kpis["active_accounts"]))
-        self.stat_cards["deposits"].update_value(format_currency(kpis["total_deposits"]))
-        self.stat_cards["loans"].update_value(format_currency(kpis["total_loans_outstanding"]))
+        if is_cust and cust_id:
+            cust_accts = account_service.list_by_customer(cust_id)
+            total_bal = sum(a.current_balance for a in cust_accts)
+            active_count = sum(1 for a in cust_accts if a.is_operational())
+
+            cust_loans = loan_service.list_loans(customer_id=cust_id)
+            total_loan_out = sum(l.outstanding_balance for l in cust_loans if l.status in ["APPROVED", "DISBURSED"])
+
+            self.stat_cards["customers"].title_label.configure(text="My Accounts")
+            self.stat_cards["customers"].update_value(str(len(cust_accts)))
+
+            self.stat_cards["accounts"].title_label.configure(text="Active Accounts")
+            self.stat_cards["accounts"].update_value(str(active_count))
+
+            self.stat_cards["deposits"].title_label.configure(text="Total Balance")
+            self.stat_cards["deposits"].update_value(format_currency(total_bal))
+
+            self.stat_cards["loans"].title_label.configure(text="Active Loans")
+            self.stat_cards["loans"].update_value(format_currency(total_loan_out))
+        else:
+            kpis = report_service.get_kpi_summary()
+            self.stat_cards["customers"].update_value(str(kpis["total_customers"]))
+            self.stat_cards["accounts"].update_value(str(kpis["active_accounts"]))
+            self.stat_cards["deposits"].update_value(format_currency(kpis["total_deposits"]))
+            self.stat_cards["loans"].update_value(format_currency(kpis["total_loans_outstanding"]))
 
         # Render Monthly Activity Chart
-        self._render_monthly_chart()
+        self._render_monthly_chart(customer_id=cust_id)
 
         # Render Distribution Chart
-        self._render_distribution_chart()
+        self._render_distribution_chart(customer_id=cust_id)
 
         # Render Recent Transactions Table
-        recent_txns = transaction_service.search_transactions(limit=8)
+        recent_txns = transaction_service.search_transactions(customer_id=cust_id, limit=8)
         table_rows = [
             {
                 "Reference No": tx.reference_no,
@@ -149,8 +173,8 @@ class AdminDashboardView(ctk.CTkScrollableFrame):
             key_fields=["Reference No", "Account", "Type", "Amount", "Balance", "Date"],
         )
 
-    def _render_monthly_chart(self):
-        df = report_service.get_monthly_transaction_stats(months=6)
+    def _render_monthly_chart(self, customer_id=None):
+        df = report_service.get_monthly_transaction_stats(months=6, customer_id=customer_id)
 
         fig, ax = plt.subplots(figsize=(6, 3), dpi=90)
         fig.patch.set_facecolor(Theme.SURFACE_CARD)
@@ -185,8 +209,8 @@ class AdminDashboardView(ctk.CTkScrollableFrame):
         plt.tight_layout()
         self.chart_activity.render_figure(fig)
 
-    def _render_distribution_chart(self):
-        df = report_service.get_account_type_distribution()
+    def _render_distribution_chart(self, customer_id=None):
+        df = report_service.get_account_type_distribution(customer_id=customer_id)
 
         fig, ax = plt.subplots(figsize=(4, 3), dpi=90)
         fig.patch.set_facecolor(Theme.SURFACE_CARD)

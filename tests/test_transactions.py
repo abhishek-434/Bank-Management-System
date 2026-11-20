@@ -80,3 +80,18 @@ def test_transaction_on_frozen_account(two_accounts):
     assert ok is False
     assert "FROZEN" in msg
 
+
+def test_search_transactions_scoped_by_account(two_accounts):
+    """Verify searching transactions by account_number isolates that account's ledger."""
+    acct1, acct2 = two_accounts
+    transaction_service.deposit(acct1, Decimal("100.00"), "Deposit Acct 1")
+    transaction_service.deposit(acct2, Decimal("200.00"), "Deposit Acct 2")
+
+    txns1 = transaction_service.search_transactions(account_number=acct1)
+    assert all(t.account.account_number == acct1 for t in txns1)
+    assert not any(t.account.account_number == acct2 for t in txns1)
+
+    txns2 = transaction_service.search_transactions(account_number=acct2)
+    assert all(t.account.account_number == acct2 for t in txns2)
+    assert not any(t.account.account_number == acct1 for t in txns2)
+

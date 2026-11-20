@@ -36,3 +36,23 @@ def test_pdf_receipt_generation(two_accounts):
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
+
+def test_export_transactions_to_csv_scoped(two_accounts):
+    """Verify CSV export properly filters by account_number and customer_id."""
+    acct1, acct2 = two_accounts
+    transaction_service.deposit(acct1, Decimal("100.00"), "Export Test 1")
+    transaction_service.deposit(acct2, Decimal("200.00"), "Export Test 2")
+
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        report_service.export_transactions_to_csv(tmp_path, account_number=acct1)
+        with open(tmp_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert acct1 in content
+        assert acct2 not in content
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+

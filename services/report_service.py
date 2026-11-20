@@ -71,14 +71,17 @@ class ReportService:
                 "total_bank_balance": Decimal(str(total_bank_balance)),
             }
 
-    def get_monthly_transaction_stats(self, months: int = 6) -> pd.DataFrame:
+    def get_monthly_transaction_stats(self, months: int = 6, customer_id: Optional[str] = None) -> pd.DataFrame:
         """Aggregate monthly deposits, withdrawals, and transfers over recent months."""
         with db_manager.session_scope() as session:
             stmt = select(
                 Transaction.created_at,
                 Transaction.transaction_type,
                 Transaction.amount,
-            ).where(Transaction.status == TransactionStatus.SUCCESS.value)
+            ).join(Account, Transaction.account_id == Account.id).where(Transaction.status == TransactionStatus.SUCCESS.value)
+
+            if customer_id:
+                stmt = stmt.where(Account.customer_id == customer_id)
 
             records = session.execute(stmt).all()
             if not records:
@@ -122,7 +125,7 @@ class ReportService:
             pivot = pivot.sort_values(by="Month").tail(months)
             return pivot
 
-    def get_account_type_distribution(self) -> pd.DataFrame:
+    def get_account_type_distribution(self, customer_id: Optional[str] = None) -> pd.DataFrame:
         """Get account counts and total balances by account type."""
         with db_manager.session_scope() as session:
             stmt = (
@@ -132,13 +135,21 @@ class ReportService:
                     func.coalesce(func.sum(Account.current_balance), Decimal("0.00")).label("balance"),
                 )
                 .join(Account, Account.account_type_id == AccountType.id, isouter=True)
-                .group_by(AccountType.name)
             )
+            if customer_id:
+                stmt = stmt.where(Account.customer_id == customer_id)
+            stmt = stmt.group_by(AccountType.name)
             rows = session.execute(stmt).all()
             data = [{"Account Type": r[0], "Count": r[1], "Total Balance": float(r[2])} for r in rows]
             return pd.DataFrame(data)
 
-    def export_transactions_to_csv(self, file_path: str, account_number: Optional[str] = None) -> str:
+    def export_transactions_to_csv(
+        self,
+        file_path: str,
+        account_number: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        transaction_type: str = "ALL",
+    ) -> str:
         """Export ledger transactions to a CSV file."""
         with db_manager.session_scope() as session:
             stmt = select(
@@ -153,8 +164,12 @@ class ReportService:
                 Transaction.created_at,
             ).join(Account, Transaction.account_id == Account.id)
 
-            if account_number:
+            if customer_id:
+                stmt = stmt.where(Account.customer_id == customer_id)
+            if account_number and account_number != "ALL":
                 stmt = stmt.where(Account.account_number == account_number.strip())
+            if transaction_type and transaction_type != "ALL":
+                stmt = stmt.where(Transaction.transaction_type == transaction_type)
 
             stmt = stmt.order_by(Transaction.created_at.desc())
             rows = session.execute(stmt).all()
